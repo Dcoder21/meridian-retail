@@ -12,10 +12,29 @@ DevOps Foundations internship project.
 - `frontend/index.html` — static storefront (calls relative `/api/*` paths)
 - `requirements.txt` / `package.json` — dependencies for each service
 
-## What you need to build
+## Infrastructure implementation
 
-The following files exist but are **empty** — you're building these from
-scratch, with no starter code or hints:
+The infrastructure files are implemented. Follow [the deployment runbook](docs/deployment.md)
+for Terraform, initial EC2 setup, DuckDNS/TLS, GitHub configuration, and evidence.
+Read [routing](docs/routing-explained.md) and [backup/recovery](docs/backup-strategy.md)
+for the operational details. A live EC2/HTTPS storefront was demonstrated on
+13 October 2026 and then torn down at the operator's request. Live EC2 restore
+and successful remote GitHub Actions deployment evidence remain to be collected.
+The deploy job runs only when the Actions variable `DEPLOY_ENABLED` is `true`;
+keep it disabled until a new host and its current settings are configured.
+
+For a functional local storefront, after setting secrets in `.env`, run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build --wait
+python scripts/smoke_test.py http://localhost:8088
+```
+
+Open `http://localhost:8088`; this includes the API reverse proxy.
+
+## Implemented files
+
+The following files implement the infrastructure around the pre-built application:
 
 - `auth-service/Dockerfile`
 - `catalog-service/Dockerfile`
@@ -24,7 +43,7 @@ scratch, with no starter code or hints:
 - `docker-compose.yml` — wire all four services + Postgres together
 - `scripts/server_setup.sh` — bootstrap a fresh EC2 instance (Docker, Nginx, Certbot)
 - `nginx/meridian-http.conf` — your hand-written reverse proxy config
-- `nginx/meridian-https-reference.conf` — filled in after running Certbot
+- `nginx/meridian-https-reference.conf` — hand-written TLS template installed after certificate issuance
 - `scripts/backup_db.sh` — automated daily Postgres backup
 - `scripts/restore_db.sh` — restore from a backup and prove it works
 - `.github/workflows/ci.yml` — build + test on every push
@@ -41,8 +60,6 @@ all ten deliverables (D1–D10), and the pre/post-assessment questions.
 cp .env.example .env
 # edit .env with real values (DB password, JWT secret, etc.)
 
-# You'll need to write docker-compose.yml and each service's Dockerfile
-# before this works:
 docker compose up -d --build
 docker compose ps          # all five containers should be Up
 curl http://localhost:8080 # should return the storefront HTML
@@ -55,12 +72,11 @@ curl http://localhost:8080 # should return the storefront HTML
 | auth-service     | 8000            | 8001                         |
 | catalog-service  | 4000            | 8002                         |
 | orders-service   | 8001            | 8003                         |
-| frontend         | 80              | 8080 (public, temporary)     |
+| frontend         | 80              | 8080 (127.0.0.1 only)        |
 | postgres         | 5432            | 5432                         |
 
-Once your reverse proxy is in place, the frontend's public port exposure
-should be reconsidered — customers should reach everything through your
-domain and Nginx, not a raw `:8080`.
+The frontend and all backend ports bind to localhost. Customers reach the
+storefront through the domain and host Nginx on ports 80/443.
 
 ## New Concepts Reference Table
 

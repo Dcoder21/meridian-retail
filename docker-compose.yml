@@ -1,0 +1,86 @@
+name: meridian
+x-db-env: &db-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ${DB_NAME:-meridian_db}
+  DB_USER: ${DB_USER:-meridian}
+  DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+x-service: &service
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+services:
+  postgres:
+    <<: *service
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: ${DB_NAME:-meridian_db}
+      POSTGRES_USER: ${DB_USER:-meridian}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  auth-service:
+    <<: *service
+    build: ./auth-service
+    image: ${ECR_REGISTRY:-meridian-local}/${ECR_REPOSITORY_PREFIX:-meridian}/auth-service:${IMAGE_TAG:-local}
+    environment:
+      <<: *db-env
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRY_MINUTES: ${JWT_EXPIRY_MINUTES:-60}
+    ports: ["127.0.0.1:8001:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  catalog-service:
+    <<: *service
+    build: ./catalog-service
+    image: ${ECR_REGISTRY:-meridian-local}/${ECR_REPOSITORY_PREFIX:-meridian}/catalog-service:${IMAGE_TAG:-local}
+    environment: *db-env
+    ports: ["127.0.0.1:8002:4000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  orders-service:
+    <<: *service
+    build: ./orders-service
+    image: ${ECR_REGISTRY:-meridian-local}/${ECR_REPOSITORY_PREFIX:-meridian}/orders-service:${IMAGE_TAG:-local}
+    environment:
+      <<: *db-env
+      AUTH_SERVICE_URL: http://auth-service:8000
+      CATALOG_SERVICE_URL: http://catalog-service:4000
+    ports: ["127.0.0.1:8003:8001"]
+    depends_on:
+      auth-service: {condition: service_healthy}
+      catalog-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  frontend:
+    <<: *service
+    build: ./frontend
+    image: ${ECR_REGISTRY:-meridian-local}/${ECR_REPOSITORY_PREFIX:-meridian}/frontend:${IMAGE_TAG:-local}
+    ports: ["127.0.0.1:8080:80"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+volumes:
+  postgres-data:
